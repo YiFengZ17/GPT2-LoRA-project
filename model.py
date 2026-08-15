@@ -1,10 +1,10 @@
 """
-A bare-bones GPT-2 style transformer.
+copy from cs224n A3
 """
 
 import math
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
 
 import torch
 from torch import nn, Tensor
@@ -45,7 +45,11 @@ class CausalAttention(nn.Module):
             persistent=False,
         )
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(
+        self,
+        x: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         B, T, D = x.shape
         n_heads = x.shape[-1] // self.d_attention
 
@@ -59,8 +63,22 @@ class CausalAttention(nn.Module):
 
         scores = q @ k.transpose(-2, -1) / math.sqrt(self.d_attention)
 
-        mask = self.causal_mask[:, :, :T, :T]
-        scores = scores.masked_fill(mask == 0, float("-inf"))
+        mask = self.causal_mask[:, :, :T, :T].bool()
+
+        if attention_mask is not None:
+            if attention_mask.shape != (B, T):
+                raise ValueError(
+                    f"attention_mask must have shape {(B, T)}, "
+                    f"got {tuple(attention_mask.shape)}"
+                )
+
+            padding_mask = attention_mask[:, None, None, :].to(
+                device=x.device,
+                dtype=torch.bool,
+            )
+            mask = mask & padding_mask
+
+        scores = scores.masked_fill(~mask, torch.finfo(scores.dtype).min)
         weights = F.softmax(scores, dim=-1)
 
         head_output = weights @ v
@@ -106,9 +124,13 @@ class DecoderBlock(nn.Module):
         self.pre_layer_norm = nn.LayerNorm(config.d_model)
         self.post_layer_norm = nn.LayerNorm(config.d_model)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(
+        self,
+        x: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         x_ln = self.pre_layer_norm(x)
-        x1 = self.attention(x_ln) + x
+        x1 = self.attention(x_ln, attention_mask=attention_mask) + x
 
         x1_ln = self.post_layer_norm(x1)
         output = self.mlp(x1_ln) + x1
@@ -147,7 +169,11 @@ class Transformer(nn.Module):
                 torch.nn.init.zeros_(module.bias)
                 torch.nn.init.ones_(module.weight)
 
-    def get_hidden_states(self, x: Tensor) -> Tensor:
+    def get_hidden_states(
+        self,
+        x: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         B, T = x.shape
         assert T <= self.config.context_length
 
@@ -159,13 +185,17 @@ class Transformer(nn.Module):
         hidden = x_position_embed + x_token_embed
 
         for block in self.backbone:
-            hidden = block(hidden)
+            hidden = block(hidden, attention_mask=attention_mask)
 
         hidden = self.final_layer_norm(hidden)
         return hidden
 
-    def forward(self, x: Tensor) -> Tensor:
-        hidden = self.get_hidden_states(x)
+    def forward(
+        self,
+        x: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        hidden = self.get_hidden_states(x, attention_mask=attention_mask)
         logits = self.lm_head(hidden)
         return logits
 
