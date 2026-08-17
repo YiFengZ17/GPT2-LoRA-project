@@ -1,3 +1,5 @@
+import copy
+
 import torch
 from torch import nn
 
@@ -67,6 +69,8 @@ def test_optimizer_and_training_update_only_trainable_parameters():
     assert metrics.examples == 4
     assert metrics.loss > 0
     assert 0.0 <= metrics.accuracy <= 1.0
+    assert 0.0 <= metrics.macro_f1 <= 1.0
+    assert len(metrics.confusion_matrix) == 2
 
 
 def test_evaluate_reports_loss_and_accuracy_without_gradients():
@@ -81,7 +85,46 @@ def test_evaluate_reports_loss_and_accuracy_without_gradients():
     assert metrics.examples == 4
     assert metrics.loss > 0
     assert metrics.accuracy == 1.0
+    assert metrics.macro_f1 == 1.0
+    assert metrics.confusion_matrix == [[2, 0], [0, 2]]
     assert model.training is False
+
+
+def test_gradient_accumulation_matches_one_effective_batch():
+    torch.manual_seed(7)
+    full_batch_model = TinyClassifier()
+    micro_batch_model = copy.deepcopy(full_batch_model)
+    full_batch_optimizer = create_optimizer(
+        full_batch_model, learning_rate=1e-2, weight_decay=0.0
+    )
+    micro_batch_optimizer = create_optimizer(
+        micro_batch_model, learning_rate=1e-2, weight_decay=0.0
+    )
+    batch = make_batch()
+    micro_batches = [
+        {key: value[:2] for key, value in batch.items()},
+        {key: value[2:] for key, value in batch.items()},
+    ]
+
+    train_one_epoch(
+        full_batch_model,
+        [batch],
+        full_batch_optimizer,
+        torch.device("cpu"),
+    )
+    train_one_epoch(
+        micro_batch_model,
+        micro_batches,
+        micro_batch_optimizer,
+        torch.device("cpu"),
+        gradient_accumulation_steps=2,
+    )
+
+    assert torch.allclose(
+        full_batch_model.classifier.weight,
+        micro_batch_model.classifier.weight,
+        atol=1e-7,
+    )
 
 
 def test_fit_saves_best_latest_and_resumes(tmp_path):
@@ -108,6 +151,7 @@ def test_fit_saves_best_latest_and_resumes(tmp_path):
     best_path = tmp_path / "best.pt"
     assert latest_path.exists()
     assert best_path.exists()
+    assert (tmp_path / "history.json").exists()
     assert len(history) == 2
 
     trained_classifier = model.classifier.weight.detach().clone()

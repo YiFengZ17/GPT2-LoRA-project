@@ -1,0 +1,11 @@
+name: gpt2-lora
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - torch>=2.4,<3
+      - transformers>=4.45,<6
+      - datasets>=3,<6
+      - pytest>=8,<10

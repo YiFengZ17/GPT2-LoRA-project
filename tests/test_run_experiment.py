@@ -24,6 +24,8 @@ def test_debug_arguments_choose_safe_defaults():
     assert args.alpha == 16
     assert args.epochs == 1
     assert args.learning_rate == 2e-4
+    assert args.precision == "auto"
+    assert args.gradient_accumulation_steps == 1
     assert args.max_train_samples == 100
     assert args.max_validation_samples == 100
     assert args.max_test_samples == 100
@@ -74,6 +76,23 @@ def test_configure_model_supports_all_training_modes():
         lora_dropout=0.0,
     )
     assert all(parameter.requires_grad for parameter in full_model.parameters())
+
+
+def test_same_seed_initializes_same_classifier_for_every_mode():
+    classifier_weights = []
+    for mode in ("frozen", "lora", "full"):
+        torch.manual_seed(123)
+        model = configure_model(
+            make_transformer(),
+            mode=mode,
+            rank=2,
+            alpha=4,
+            lora_dropout=0.0,
+        )
+        classifier_weights.append(model.classifier.weight.detach().clone())
+
+    assert torch.equal(classifier_weights[0], classifier_weights[1])
+    assert torch.equal(classifier_weights[0], classifier_weights[2])
 
 
 def test_select_device_rejects_unavailable_cuda():

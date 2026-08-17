@@ -8,7 +8,10 @@
 GPT2——LoRA project/
 ├── model.py              # GPT-2 核心网络、语言模型损失和生成
 ├── weight_converter.py   # Hugging Face GPT-2 权重格式转换
-├── requirements.txt      # 最小运行依赖
+├── run_experiment.py     # 单次 Frozen / LoRA / Full 实验
+├── run_suite.py          # 多随机种子与 LoRA rank 消融的一键实验套件
+├── environment.yml       # 可复现 Conda 环境
+├── requirements.txt      # Python 依赖版本范围
 ├── LoRA详细讲义.md        # LoRA 理论讲义
 └── README.md              # 项目入口与模块说明
 ```
@@ -105,12 +108,103 @@ logits: torch.Size([2, 8, 100])
 loss: torch.Size([])
 ```
 
-## 下一步
+## 服务器安装
 
-下一阶段将在这个基础上依次加入：
+```bash
+git clone https://github.com/YiFengZ17/GPT2-LoRA-project.git
+cd GPT2-LoRA-project
+conda env create -f environment.yml
+conda activate gpt2-lora
+python -m pytest -q
+```
 
-1. `LoRALinear`
-2. 对 `W_q`、`W_v` 的 LoRA 注入
-3. padding attention mask
-4. SST-5 情感分类头
-5. Frozen / LoRA / Full Fine-tuning 对比实验
+第一次运行会从 Hugging Face 下载 GPT-2 权重、tokenizer 和 `SetFit/sst5`
+数据集，之后使用本地缓存。若服务器无法访问 Hugging Face，可在国内网络使用镜像：
+
+```bash
+export HF_ENDPOINT=https://hf-mirror.com
+```
+
+不要在日本 VPN 下使用该国内镜像。
+
+## 先做冒烟测试
+
+冒烟测试（smoke test）只验证整条训练链路，不作为实验结论：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python run_experiment.py \
+  --mode lora --rank 8 --debug --device cuda --precision fp16 \
+  --output-dir runs/smoke
+```
+
+## 一次跑完整实验
+
+主实验固定使用完整 SST-5、5 个 epoch、3 个随机种子，并比较：
+
+1. Frozen GPT-2 + 分类头基线；
+2. LoRA rank 2、4、8、16 消融；
+3. Full fine-tuning 上界。
+
+共 `3 × (1 + 4 + 1) = 18` 次独立运行：
+
+先运行 `nvidia-smi`，确认 0、1、2、3 确实是导师分配且当前可用的 GPU。不要占用其他人的卡。四张卡均可用时：
+
+```bash
+python run_suite.py \
+  --output-dir runs/main-study \
+  --device cuda \
+  --gpus 0 1 2 3 \
+  --parallel 4 \
+  --precision fp16 \
+  --epochs 5 \
+  --batch-size 8 \
+  --gradient-accumulation-steps 1 \
+  --max-length 128 \
+  --num-workers 2 \
+  --seeds 13 42 2026 \
+  --ranks 2 4 8 16 \
+  2>&1 | tee runs/main-study/launcher.log
+```
+
+建议在 `tmux` 或 `screen` 中运行，防止本地 SSH 断线终止训练。重新执行同一条命令时，已经完成的 run 会跳过；存在 `latest.pt` 的未完成 run 会从最近 epoch 恢复。
+
+调度器会先单进程准备并缓存数据、tokenizer 和 GPT-2 权重，然后动态地让每张空闲 GPU 领取下一个实验。四张卡的显存不会合并，每个实验始终只使用一张卡；这种方式不会引入 DDP 的通信开销，适合彼此独立的 18 次实验。FP16 自动混合精度会同时用于训练和评估，GradScaler 状态也保存在断点中。
+
+上述高吞吐命令依靠固定 seed 和三次独立重复控制随机性，但不要求 CUDA 逐算子确定性。若需要逐次运行尽可能完全复现，可额外添加 `--deterministic`，代价是部分算子可能变慢。
+
+如果 Full fine-tuning 在 11GB 卡上仍发生 OOM，把所有模式统一改为 `--batch-size 4 --gradient-accumulation-steps 2`，有效 batch size 仍为 8，实验仍可公平比较。
+
+若服务器没有 `tmux`/`screen` 且你没有 sudo，可用系统自带的 `nohup`：
+
+```bash
+mkdir -p runs/main-study
+nohup python -u run_suite.py \
+  --output-dir runs/main-study \
+  --device cuda \
+  --gpus 0 1 2 3 \
+  --parallel 4 \
+  --precision fp16 \
+  --epochs 5 \
+  --batch-size 8 \
+  --gradient-accumulation-steps 1 \
+  --max-length 128 \
+  --num-workers 2 \
+  --seeds 13 42 2026 \
+  --ranks 2 4 8 16 \
+  > runs/main-study/launcher.log 2>&1 &
+
+echo $! > runs/main-study/launcher.pid
+tail -f runs/main-study/launcher.log
+```
+
+每个 run 保存：
+
+- `config.json`：命令参数、Git commit 和状态；
+- `history.json`：逐 epoch 的 loss、accuracy、macro-F1、类别准确率、混淆矩阵和耗时；
+- `latest.pt` / `best.pt`：断点与最佳验证集模型；
+- `result.json`：测试集指标、可训练参数比例、总耗时、峰值显存和运行环境；
+- `train.log`：完整标准输出与报错。
+
+套件根目录保存 `summary.csv`（每次运行）和 `aggregate.csv`（各方法跨随机种子的均值与样本标准差）。这些记录共同回答项目目的：LoRA 相比 Frozen 能提升多少效果、相比 Full 使用多少可训练参数和显存，以及 rank 对效果/成本的影响。
+
+正式写结论时以测试准确率 (test accuracy)、宏平均 F1 (macro-F1)、均值±标准差、可训练参数比例、峰值显存和训练时间为证据，不把单个随机种子的最好结果当作总体结论。

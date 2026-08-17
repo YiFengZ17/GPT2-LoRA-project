@@ -6,13 +6,14 @@ from pathlib import Path
 from typing import Dict, List
 
 import torch
-from datasets import DatasetDict, load_from_disk
+from datasets import DatasetDict, load_dataset, load_from_disk
 from torch import Tensor
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 
 DATA_PATH = Path(__file__).resolve().parent / "data" / "sst5"
+DATASET_ID = "SetFit/sst5"
 
 
 def load_sst5() -> DatasetDict:
@@ -20,17 +21,27 @@ def load_sst5() -> DatasetDict:
     Load the locally saved SST-5 train, validation, and test splits.
     """
 
-    return load_from_disk(str(DATA_PATH))
+    if DATA_PATH.exists():
+        return load_from_disk(str(DATA_PATH))
+
+    # A fresh clone intentionally does not contain the dataset. Download it
+    # once, then persist the exact snapshot used by subsequent runs.
+    dataset = load_dataset(DATASET_ID)
+    if not isinstance(dataset, DatasetDict):
+        raise TypeError(f"expected DatasetDict from {DATASET_ID}, got {type(dataset)}")
+    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    dataset.save_to_disk(str(DATA_PATH))
+    return dataset
 
 
 def create_tokenizer() -> PreTrainedTokenizerBase:
     """
-    Load the cached GPT-2 tokenizer and configure right-side padding.
+    Load the GPT-2 tokenizer (downloading it on first use) and configure
+    right-side padding.
     """
 
     tokenizer = AutoTokenizer.from_pretrained(
         "gpt2",
-        local_files_only=True,
     )
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
@@ -85,6 +96,8 @@ def create_dataloaders(
     batch_size: int = 8,
     max_length: int = 128,
     num_workers: int = 0,
+    seed: int = 42,
+    pin_memory: bool = False,
 ) -> Dict[str, DataLoader]:
     """
     Create train, validation, and test DataLoaders for SST-5.
@@ -104,14 +117,19 @@ def create_dataloaders(
         tokenizer=tokenizer,
         max_length=max_length,
     )
+    train_generator = torch.Generator()
+    train_generator.manual_seed(seed)
 
     return {
         "train": DataLoader(
             dataset["train"],
             batch_size=batch_size,
             shuffle=True,
+            generator=train_generator,
             num_workers=num_workers,
             collate_fn=collator,
+            pin_memory=pin_memory,
+            persistent_workers=num_workers > 0,
         ),
         "validation": DataLoader(
             dataset["validation"],
@@ -119,6 +137,8 @@ def create_dataloaders(
             shuffle=False,
             num_workers=num_workers,
             collate_fn=collator,
+            pin_memory=pin_memory,
+            persistent_workers=num_workers > 0,
         ),
         "test": DataLoader(
             dataset["test"],
@@ -126,5 +146,7 @@ def create_dataloaders(
             shuffle=False,
             num_workers=num_workers,
             collate_fn=collator,
+            pin_memory=pin_memory,
+            persistent_workers=num_workers > 0,
         ),
     }
