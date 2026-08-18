@@ -1,0 +1,51 @@
+{
+  "quality": {
+    "checks_passed": 10,
+    "checks_total": 10,
+    "all_passed": true
+  },
+  "design": {
+    "runs": 30,
+    "configurations": 6,
+    "seeds": [
+      7,
+      13,
+      42,
+      123,
+      2026
+    ],
+    "epochs": 5,
+    "dataset_sizes": {
+      "train": 8544,
+      "validation": 1101,
+      "test": 2210
+    },
+    "deterministic": false,
+    "git_commit_recorded": false,
+    "code_hash_snapshot_verified": true
+  },
+  "main_result": {
+    "best_observed_test_configuration": "LoRA r=16",
+    "validation_led_accuracy_choice": "LoRA r=2",
+    "validation_led_macro_f1_choice": "LoRA r=16",
+    "test_accuracy_mean": 0.5215384615384615,
+    "test_accuracy_std": 0.007384027569542607,
+    "test_macro_f1_mean": 0.49490008871355207,
+    "test_macro_f1_std": 0.015650616163629606,
+    "accuracy_delta_vs_full_pp": 1.2126696832579165,
+    "macro_f1_delta_vs_full_pp": 2.946333811310009,
+    "accuracy_delta_vs_frozen_pp": 4.778280542986424,
+    "macro_f1_delta_vs_frozen_pp": 9.185354036110787,
+    "trainable_parameter_reduction_vs_full_x": 209.6179066112598,
+    "checkpoint_reduction_vs_full_x": 206.69156290592733,
+    "peak_memory_reduction_vs_full_percent": 51.424099202694904,
+    "train_time_reduction_vs_full_percent": 19.335711485710615
+  },
+  "limitations": [
+    "Only 5 seeds were run, so uncertainty estimates remain descriptive rather than strong inferential evidence.",
+    "deterministic=false, so reruns with the same seed are not guaranteed to be bitwise identical.",
+    "git_commit is null; the separately recorded SHA-256 snapshot verifies the matching local training files but does not preserve Git history.",
+    "Runs were collected in two launcher waves with different GPU concurrency; wall-clock timing can be affected by GPU assignment and shared-server contention.",
+    "The same test split was evaluated for all configurations; treat rank selection as validation-led and avoid post-hoc claims based only on the best test mean."
+  ]
+}

@@ -1,0 +1,11 @@
+check,status,severity_if_failed,evidence
+Suite manifest completed,PASS,critical,status=completed
+Expected run count,PASS,critical,"completed=30, expected=30, failed=0"
+Summary row count,PASS,critical,"rows=30, expected=30"
+Unique run names,PASS,critical,unique=30/30
+Per-run files and cross-file consistency,PASS,critical,all result/config/history files agree with summary.csv
+Complete 6 x 5 design,PASS,critical,"observed=30, expected=30"
+Uniform software and GPU family,PASS,high,3.13.15/2.13.0+cu130/13.0/NVIDIA GeForce RTX 2080 Ti
+Uniform core training settings,PASS,high,"precision=['fp16'], effective_batch_size=['8'], epochs_completed=['5']"
+Training code SHA-256 snapshot,PASS,high,7/7 files match the recorded hashes
+Aggregate recomputation,PASS,critical,all supplied means and sample standard deviations reproduced
